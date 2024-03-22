@@ -1,0 +1,32 @@
+---
+title: "Sobj"
+output: html_document
+---
+#Convert h5ad to seurat object
+#first part in jupyter notebook
+#23_9_25_converting_from_h5ad
+
+        
+```{r}
+## in Rstudio
+
+library(Seurat)
+library(SeuratDisk)
+library(SeuratData)
+
+Raw_data <- Read10X(data.dir = 'C:/Users/joshu/Desktop/colitis/converting_from_h5ad/biopsy_RNA')
+
+metadata <- read.csv('C:/Users/joshu/Desktop/colitis/converting_from_h5ad/biopsy_RNA/metadata.csv', row.names = 1)
+
+#create seurat obj
+sobj <- CreateSeuratObject(counts = Raw_data, meta.data = metadata)
+saveRDS(sobj, file = "C:/Users/joshu/Desktop/colitis/converting_from_h5ad/biopsy_RNA_finalR/biopsy_RNA_finalR.rds")
+#check that you can read it in
+sobj <- readRDS(file = "C:/Users/joshu/Desktop/colitis/converting_from_h5ad/biopsy_RNA_finalR/biopsy_RNA_finalR.rds")
+sobj
+#STOP
+
+
+```
+
+

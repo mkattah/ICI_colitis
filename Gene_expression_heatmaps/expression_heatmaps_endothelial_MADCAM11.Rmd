@@ -1,0 +1,223 @@
+---
+title: "23_09_26_heatmap_mast_HC_UC_blood"
+author: "Elvira"
+output: html_document
+date: "2023-09-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(gridExtra)
+library(matrixStats)
+library(patchwork)
+library(pheatmap)
+library(Seurat)
+library(RColorBrewer)
+library(reshape2)
+library(SeuratDisk)
+library(SeuratData)
+library(reticulate)
+library(scater)
+library(cowplot)
+library(sceasy)
+library(biomaRt)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+library(reshape2)
+library(fs)  # Load fs before tiledbsc
+library(tiledb)
+library(tiledbsc)
+library(SeuratObject)
+library(tidyverse)
+library(anndata)
+library(DESeq2)  # Added DESeq2
+library(MAST) #Added MAST
+library(zinbwave) #Added zinbwave
+library(doParallel)
+library(forcats)
+library(Seurat)
+library(harmony)
+library(readxl)
+library(SingleCellExperiment)
+library(SummarizedExperiment)
+library(ComplexHeatmap)
+library(future)
+library(foreach)
+library(RColorBrewer)
+library(colorRamp2)
+```
+
+```{r}
+sobj<-readRDS('C:/Users/joshu/Desktop/jupyter dotplots/converting_from_h5ad/biopsy_RNA_finalR/biopsy_RNA_finalR.rds')
+```
+
+
+#if you want to add annotations here
+sc_cell_info <- read.csv("/Users/mkattah/Library/CloudStorage/Box-Box/R:Users:michaelkattah:Box Sync:Research/Kattah Lab/Rmd_notebooks/23_9_3_XAUT1/MAST/MAST_fresh_frozen/23_9_26_fresh_frozen.csv", header = T)
+colnames(sc_cell_info)[1] <- "cell_ID"
+head(sc_cell_info)
+# add Sample metadata to the seurat_obj[[]] slot, ONE by ONE!
+sobj[['cluster_sample']] <- sc_cell_info$cluster_sample[match(rownames(sobj@meta.data), sc_cell_info$cell_ID)
+
+
+
+```{r}
+raw_counts <- sobj@assays$RNA@counts
+total_raw_counts <- colSums(raw_counts)
+hist(total_raw_counts, breaks=50, main="Total Raw Counts Distribution", xlab="Total Counts", ylab="Number of Cells")
+```
+
+
+
+
+```{r}
+#Normalize
+sobj <- NormalizeData(sobj)
+```
+
+```{r}
+normalized_data <- sobj@assays$RNA@data
+total_normalized_counts <- colSums(normalized_data)
+hist(total_normalized_counts, breaks=50, main="Total Normalized Counts Distribution", xlab="Total Expression", ylab="Number of Cells")
+
+```
+
+```{r}
+# Reverse log-transformation and sum counts for each cell
+total_counts_original_scale <- colSums(expm1(normalized_data))
+
+# Check the summary statistics
+summary(total_counts_original_scale)
+
+
+```
+
+```{r}
+# Get normalized data
+normalized_data <- sobj@assays$RNA@data
+
+# Sum the normalized counts for each cell
+total_normalized_counts <- colSums(normalized_data)
+
+# Check the summary statistics
+summary(total_normalized_counts)
+
+```
+
+
+```{r}
+#subset obj
+sobj_cpi <- subset(sobj, subset = cpi %in% c('none', 'PD-1', 'combo'))
+
+endo <- c('Endothelial')
+sobj_CPI_endo <- subset(sobj_cpi, subset = JH_COARSE %in% endo)
+Final <- c('HS1', 'HS2', 'HS3', 'HS8', 'HS9', 'HS10', 'HS11', 'HS12', 'HS13', 'HS14', 'HS15')
+sobj_Final <- subset(sobj_CPI_endo, subset = CoLabs_patient %in% Final)
+
+```
+
+```{r}
+#endo for me
+# Define genes to plot
+genes_to_plot <- c('MADCAM1')
+up_genes <- c('MADCAM1')
+down_genes <- c()
+gene_status <- c(rep('Up', length(up_genes)), rep('Down', length(down_genes)))
+names(gene_status) <- c(up_genes, down_genes)
+
+# Prepare the color for the row annotation bar
+row_anno_colors <- ifelse(gene_status == "Up", "white", "white")
+# Create a data.frame to hold this information
+anno_df <- data.frame(status = gene_status, stringsAsFactors = FALSE)
+rownames(anno_df) <- names(gene_status)
+# Create the heatmap row annotation
+ha <- rowAnnotation(status = anno_block(gp = gpar(fill = row_anno_colors), width = unit(2, "mm"), labels = NULL))
+
+# Calculate averages across single-cells for each sample
+avg_exp = AverageExpression(sobj_Final , assays = "RNA", slot = "data", features = genes_to_plot, group.by = "CoLabs_patient")
+
+# Calculate z-scores
+            avg_exp = apply(avg_exp$RNA, 1, scale) %>% t() %>% as.data.frame() %>% setNames(colnames(avg_exp$RNA))
+# Replace the column names
+colnames(avg_exp) <- gsub("XAUT1-HS1", "HS1", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS2", "HS2", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS3", "HS3", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS4", "HS4", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS5", "HS5", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS6", "HS6", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS7", "HS7", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS8", "HS8", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS9", "HS9", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS10", "HS10", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS11", "HS11", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS12", "HS12", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS13", "HS13", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS14", "HS14", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS15", "HS15", colnames(avg_exp))
+# Define the status
+sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS4'='U','HS5'='U', 'HS6'='U', 'HS7'='P/N', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+#sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+
+# Here plotting with ComplexHeatmap to control y axis
+avg_exp_matrix = as.matrix(avg_exp)
+# Define custom color scale
+
+
+breaks = c(-1,0,1) 
+colors = c("purple", "white","yellow")
+
+
+
+color_scale = colorRamp2(breaks, colors)
+
+
+# Generate heatmap with ComplexHeatmap
+pseudobulk_heatmap = Heatmap(avg_exp_matrix,
+                             name = "z-score",
+                             col = color_scale,
+                             column_split = sample_status[colnames(avg_exp)],
+                             #row_split = gene_status[rownames(avg_exp_matrix)],
+                             show_column_names = T,
+                             border = "black",
+                             rect_gp = gpar(col = "black", lwd = 0.5), # Adds a border to each cell
+                             row_names_gp = grid::gpar(fontsize = 10, fontface = "italic"),
+                             column_names_gp = grid::gpar(fontsize = 10),
+                             column_title_gp = grid::gpar(fontsize = 10),
+                             #row_km = 2,
+                             cluster_rows=T,
+                             cluster_columns=T,
+                             #column_title_rot = 30,  # rotate column names by 90 degrees
+                             heatmap_legend_param = list
+                              (title_gp = gpar(fontsize = 10, fontface = "plain"),
+                                labels_gp = gpar(fontsize = 10)), 
+                             row_title = NULL,  # To remove the default row title since we have italicized the rownames
+                             width = ncol(avg_exp_matrix)*unit(3, "mm"), 
+                             height = nrow(avg_exp_matrix)*unit(3, "mm"),
+                             #right_annotation = ha
+                             )
+
+# Save the heatmap
+heatmap_title <- "MADCAM1 Endothelial"
+
+# Save the heatmap with the title as part of the filename
+pdf(paste0(heatmap_title, "_heatmap_avgexp_rainbow_0centered.pdf"))
+draw(pseudobulk_heatmap, 
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+dev.off()
+
+# Display heatmap (without saving)
+draw(pseudobulk_heatmap,
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+
+```
+
+```{r}
+sessionInfo()
+```
+

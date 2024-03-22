@@ -1,0 +1,1380 @@
+---
+title: "23_09_26_heatmap_mast_HC_UC_blood"
+author: "Josh"
+output: html_document
+date: "2024-02-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(gridExtra)
+library(matrixStats)
+library(patchwork)
+library(pheatmap)
+library(Seurat)
+library(RColorBrewer)
+library(reshape2)
+library(SeuratDisk)
+library(SeuratData)
+library(reticulate)
+library(scater)
+library(cowplot)
+library(sceasy)
+library(biomaRt)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+library(reshape2)
+library(fs)  # Load fs before tiledbsc
+library(tiledb)
+library(tiledbsc)
+library(SeuratObject)
+library(tidyverse)
+library(anndata)
+library(DESeq2)  # Added DESeq2
+library(MAST) #Added MAST
+library(zinbwave) #Added zinbwave
+library(doParallel)
+library(forcats)
+library(Seurat)
+library(harmony)
+library(readxl)
+library(SingleCellExperiment)
+library(SummarizedExperiment)
+library(ComplexHeatmap)
+library(future)
+library(foreach)
+library(RColorBrewer)
+library(colorRamp2)
+
+sobj<-readRDS('C:/Users/joshu/Desktop/jupyter dotplots/converting_from_h5ad/biopsy_RNA_finalR/biopsy_RNA_finalR.rds')
+
+
+raw_counts <- sobj@assays$RNA@counts
+total_raw_counts <- colSums(raw_counts)
+hist(total_raw_counts, breaks=50, main="Total Raw Counts Distribution", xlab="Total Counts", ylab="Number of Cells")
+
+
+#Normalize
+sobj <- NormalizeData(sobj)
+
+
+normalized_data <- sobj@assays$RNA@data
+total_normalized_counts <- colSums(normalized_data)
+hist(total_normalized_counts, breaks=50, main="Total Normalized Counts Distribution", xlab="Total Expression", ylab="Number of Cells")
+
+
+
+# Reverse log-transformation and sum counts for each cell
+total_counts_original_scale <- colSums(expm1(normalized_data))
+
+# Check the summary statistics
+summary(total_counts_original_scale)
+
+
+
+# Get normalized data
+normalized_data <- sobj@assays$RNA@data
+
+# Sum the normalized counts for each cell
+total_normalized_counts <- colSums(normalized_data)
+
+# Check the summary statistics
+summary(total_normalized_counts)
+
+```
+
+
+```{r}
+#subset obj
+sobj_dis <- subset(sobj, subset = disease %in% c('HC', 'UC', 'CPI_colitis'))
+#sobj_UCV_UC <- subset(sobj, subset = condition %in% c('UCV', 'UCNB'))
+
+
+CD8T <- c('CD8T')
+sobj_CD8T <- subset(sobj_dis, subset = JH_COARSE %in% CD8T)
+
+cycling <- c('Cycling')
+sobj_cycling <- subset(sobj_dis, subset = JH_COARSE %in% cycling)
+
+myeloid <- c('Myeloid')
+sobj_myeloid <- subset(sobj_dis, subset = JH_COARSE %in% myeloid)
+
+plasma <- c('Plasma_cells')
+sobj_plasma <- subset(sobj_dis, subset = JH_COARSE %in% plasma)
+
+GD <- c('GD_T_cells')
+sobj_GD <- subset(sobj_dis, subset = JH_COARSE %in% GD)
+
+epi <- c('Epithelial')
+sobj_epi <- subset(sobj_dis, subset = JH_COARSE %in% epi)
+
+endo <- c('Endothelial')
+sobj_endo <- subset(sobj_dis, subset = JH_COARSE %in% endo)
+
+ent <- c('Enteric_neural')
+sobj_ent <- subset(sobj_dis, subset = JH_COARSE %in% ent)
+
+mes <- c('Mesenchymal_stromal')
+sobj_mes <- subset(sobj_dis, subset = JH_COARSE %in% mes)
+
+
+Final <- c('HS1', 'HS2', 'HS3', 'HS4', 'HS5', 'HS7','HS8', 'HS9', 'HS10', 'HS11', 'HS12', 'HS13', 'HS14', 'HS15')
+
+sobj_FinalCD8T <- subset(sobj_CD8T, subset = CoLabs_patient %in% Final)
+sobj_Finalcycling <- subset(sobj_cycling, subset = CoLabs_patient %in% Final)
+sobj_Finalmyeloid <- subset(sobj_myeloid, subset = CoLabs_patient %in% Final)
+sobj_Finalplasma <- subset(sobj_plasma, subset = CoLabs_patient %in% Final)
+sobj_FinalGD <- subset(sobj_GD, subset = CoLabs_patient %in% Final)
+sobj_Finalepi <- subset(sobj_epi, subset = CoLabs_patient %in% Final)
+sobj_Finalendo <- subset(sobj_endo, subset = CoLabs_patient %in% Final)
+sobj_Finalent <- subset(sobj_ent, subset = CoLabs_patient %in% Final)
+sobj_Finalmes <- subset(sobj_mes, subset = CoLabs_patient %in% Final)
+
+```
+
+```{r}
+###CD8T
+# Define genes to plot
+genes_to_plot <- c('FKBP5','IFNG','GZMB','PRF1','GZMA','GZMH','BATF','CTLA4','LAG3','ENTPD1','CD38','HLA-DRA','CCL4','CCL5','CXCR6','ITGAE','ITK','TNF','ANXA1')
+up_genes <- c('FKBP5','IFNG','GZMB','PRF1','GZMA','GZMH','BATF','CTLA4','LAG3','ENTPD1','CD38','HLA-DRA','CCL4','CCL5','CXCR6','ITGAE','ITK')
+down_genes <- c('TNF','ANXA1')
+gene_status <- c(rep('Up', length(up_genes)), rep('Down', length(down_genes)))
+names(gene_status) <- c(up_genes, down_genes)
+
+# Prepare the color for the row annotation bar
+row_anno_colors <- ifelse(gene_status == "Up", "white", "white")
+# Create a data.frame to hold this information
+anno_df <- data.frame(status = gene_status, stringsAsFactors = FALSE)
+rownames(anno_df) <- names(gene_status)
+# Create the heatmap row annotation
+ha <- rowAnnotation(status = anno_block(gp = gpar(fill = row_anno_colors), width = unit(2, "mm"), labels = NULL))
+
+# Calculate averages across single-cells for each sample
+avg_exp = AverageExpression(sobj_FinalCD8T , assays = "RNA", slot = "data", features = genes_to_plot, group.by = "CoLabs_patient")
+
+# Calculate z-scores
+            avg_exp = apply(avg_exp$RNA, 1, scale) %>% t() %>% as.data.frame() %>% setNames(colnames(avg_exp$RNA))
+# Replace the column names
+colnames(avg_exp) <- gsub("XAUT1-HS1", "HS1", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS2", "HS2", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS3", "HS3", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS4", "HS4", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS5", "HS5", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS7", "HS7", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS8", "HS8", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS9", "HS9", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS10", "HS10", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS11", "HS11", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS12", "HS12", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS13", "HS13", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS14", "HS14", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS15", "HS15", colnames(avg_exp))
+# Define the status
+sample_status = c('HS1'='HC', 'HS2'='HC', 'HS3'='HC', 'HS4'='UC','HS5'='UC', 'HS6'='UC', 'HS7'='CPI_colitis', 'HS8'='CPI_colitis', 'HS9'='CPI_colitis', 'HS10'='CPI_colitis', 'HS11'='CPI_colitis', 'HS12'='CPI_colitis', 'HS13'='CPI_colitis', 'HS14'='CPI_colitis', 'HS15'='CPI_colitis')
+#THIS IS USED FOR MADCAM sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS4'='U','HS5'='U', 'HS6'='U', 'HS7'='P/N', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+
+# Here plotting with ComplexHeatmap to control y axis
+avg_exp_matrix = as.matrix(avg_exp)
+# Define custom color scale
+
+breaks = c(-0.75,0,0.75)  # Explicitly set the min-mid-max values
+#breaks = c(-1,0,1)  # Explicitly set the min-mid-max values
+colors = c("blue",  "white","red")  # Corresponding colors
+
+
+color_scale = colorRamp2(breaks, colors)
+
+
+# Generate heatmap with ComplexHeatmap
+pseudobulk_heatmap = Heatmap(avg_exp_matrix,
+                             name = "z-score",
+                             col = color_scale,
+                             column_split = sample_status[colnames(avg_exp)],
+                             row_split = gene_status[rownames(avg_exp_matrix)],
+                             show_column_names = T,
+                             border = "black",
+                             rect_gp = gpar(col = "black", lwd = 0.5), # Adds a border to each cell
+                             row_names_gp = grid::gpar(fontsize = 10, fontface = "italic"),
+                             column_names_gp = grid::gpar(fontsize = 10),
+                             column_title_gp = grid::gpar(fontsize = 10),
+                             #row_km = 2,
+                             cluster_rows=T,
+                             cluster_columns=T,
+                             #column_title_rot = 30,  # rotate column names by 90 degrees
+                             heatmap_legend_param = list
+                              (title_gp = gpar(fontsize = 10, fontface = "plain"),
+                                labels_gp = gpar(fontsize = 10)), 
+                             row_title = NULL,  # To remove the default row title since we have italicized the rownames
+                             width = ncol(avg_exp_matrix)*unit(3, "mm"), 
+                             height = nrow(avg_exp_matrix)*unit(3, "mm"),
+                             #right_annotation = ha
+                             )
+
+# Save the heatmap
+heatmap_title <- "CD8T"
+
+# Save the heatmap with the title as part of the filename
+pdf(paste0(heatmap_title, "_heatmap_avgexpr_075.pdf"))
+draw(pseudobulk_heatmap, 
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+dev.off()
+
+# Display heatmap (without saving)
+draw(pseudobulk_heatmap,
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+
+```
+
+
+
+
+```{r}
+###plasma
+# Define genes to plot
+genes_to_plot <- c('FKBP5','ITGB7','IGLL5','CD44','ITGA4','IGHA2','TNFRSF13B')
+up_genes <- c('FKBP5')
+down_genes <- c('ITGB7','IGLL5','CD44','ITGA4','IGHA2','TNFRSF13B')
+gene_status <- c(rep('Up', length(up_genes)), rep('Down', length(down_genes)))
+names(gene_status) <- c(up_genes, down_genes)
+
+# Prepare the color for the row annotation bar
+row_anno_colors <- ifelse(gene_status == "Up", "white", "white")
+# Create a data.frame to hold this information
+anno_df <- data.frame(status = gene_status, stringsAsFactors = FALSE)
+rownames(anno_df) <- names(gene_status)
+# Create the heatmap row annotation
+ha <- rowAnnotation(status = anno_block(gp = gpar(fill = row_anno_colors), width = unit(2, "mm"), labels = NULL))
+
+# Calculate averages across single-cells for each sample
+avg_exp = AverageExpression(sobj_Finalplasma , assays = "RNA", slot = "data", features = genes_to_plot, group.by = "CoLabs_patient")
+
+# Calculate z-scores
+            avg_exp = apply(avg_exp$RNA, 1, scale) %>% t() %>% as.data.frame() %>% setNames(colnames(avg_exp$RNA))
+# Replace the column names
+colnames(avg_exp) <- gsub("XAUT1-HS1", "HS1", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS2", "HS2", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS3", "HS3", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS4", "HS4", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS5", "HS5", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS6", "HS6", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS7", "HS7", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS8", "HS8", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS9", "HS9", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS10", "HS10", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS11", "HS11", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS12", "HS12", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS13", "HS13", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS14", "HS14", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS15", "HS15", colnames(avg_exp))
+# Define the status
+sample_status = c('HS1'='HC', 'HS2'='HC', 'HS3'='HC', 'HS4'='UC','HS5'='UC', 'HS6'='UC', 'HS7'='CPI_colitis', 'HS8'='CPI_colitis', 'HS9'='CPI_colitis', 'HS10'='CPI_colitis', 'HS11'='CPI_colitis', 'HS12'='CPI_colitis', 'HS13'='CPI_colitis', 'HS14'='CPI_colitis', 'HS15'='CPI_colitis')
+#THIS IS USED FOR MADCAM sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS4'='U','HS5'='U', 'HS6'='U', 'HS7'='P/N', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+#sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+
+# Here plotting with ComplexHeatmap to control y axis
+avg_exp_matrix = as.matrix(avg_exp)
+# Define custom color scale
+
+
+breaks = c(-1,0,1)  # Explicitly set the min-mid-max values
+colors = c("blue", "white", "red")  # Corresponding colors
+
+
+color_scale = colorRamp2(breaks, colors)
+
+
+# Generate heatmap with ComplexHeatmap
+pseudobulk_heatmap = Heatmap(avg_exp_matrix,
+                             name = "z-score",
+                             col = color_scale,
+                             column_split = sample_status[colnames(avg_exp)],
+                             row_split = gene_status[rownames(avg_exp_matrix)],
+                             show_column_names = T,
+                             border = "black",
+                             rect_gp = gpar(col = "black", lwd = 0.5), # Adds a border to each cell
+                             row_names_gp = grid::gpar(fontsize = 10, fontface = "italic"),
+                             column_names_gp = grid::gpar(fontsize = 10),
+                             column_title_gp = grid::gpar(fontsize = 10),
+                             #row_km = 2,
+                             cluster_rows=T,
+                             cluster_columns=T,
+                             #column_title_rot = 30,  # rotate column names by 90 degrees
+                             heatmap_legend_param = list
+                              (title_gp = gpar(fontsize = 10, fontface = "plain"),
+                                labels_gp = gpar(fontsize = 10)), 
+                             row_title = NULL,  # To remove the default row title since we have italicized the rownames
+                             width = ncol(avg_exp_matrix)*unit(3, "mm"), 
+                             height = nrow(avg_exp_matrix)*unit(3, "mm"),
+                             #right_annotation = ha
+                             )
+
+# Save the heatmap
+heatmap_title <- "Plasma cells"
+
+# Save the heatmap with the title as part of the filename
+pdf(paste0(heatmap_title, "_heatmap_avgexp_subset.pdf"))
+draw(pseudobulk_heatmap, 
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+dev.off()
+
+# Display heatmap (without saving)
+draw(pseudobulk_heatmap,
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+
+```
+
+
+
+
+```{r}
+###GD
+# Define genes to plot
+genes_to_plot <- c('FKBP5','GZMB','CCL3L3','CX3CR1','SOCS3')
+up_genes <- c('FKBP5','GZMB','CCL3L3','CX3CR1','SOCS3')
+down_genes <- c()
+gene_status <- c(rep('Up', length(up_genes)), rep('Down', length(down_genes)))
+names(gene_status) <- c(up_genes, down_genes)
+
+# Prepare the color for the row annotation bar
+row_anno_colors <- ifelse(gene_status == "Up", "white", "white")
+# Create a data.frame to hold this information
+anno_df <- data.frame(status = gene_status, stringsAsFactors = FALSE)
+rownames(anno_df) <- names(gene_status)
+# Create the heatmap row annotation
+ha <- rowAnnotation(status = anno_block(gp = gpar(fill = row_anno_colors), width = unit(2, "mm"), labels = NULL))
+
+# Calculate averages across single-cells for each sample
+avg_exp = AverageExpression(sobj_FinalGD , assays = "RNA", slot = "data", features = genes_to_plot, group.by = "CoLabs_patient")
+
+# Calculate z-scores
+            avg_exp = apply(avg_exp$RNA, 1, scale) %>% t() %>% as.data.frame() %>% setNames(colnames(avg_exp$RNA))
+# Replace the column names
+colnames(avg_exp) <- gsub("XAUT1-HS1", "HS1", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS2", "HS2", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS3", "HS3", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS4", "HS4", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS5", "HS5", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS6", "HS6", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS7", "HS7", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS8", "HS8", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS9", "HS9", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS10", "HS10", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS11", "HS11", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS12", "HS12", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS13", "HS13", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS14", "HS14", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS15", "HS15", colnames(avg_exp))
+# Define the status
+sample_status = c('HS1'='HC', 'HS2'='HC', 'HS3'='HC', 'HS4'='UC','HS5'='UC', 'HS6'='UC', 'HS7'='CPI_colitis', 'HS8'='CPI_colitis', 'HS9'='CPI_colitis', 'HS10'='CPI_colitis', 'HS11'='CPI_colitis', 'HS12'='CPI_colitis', 'HS13'='CPI_colitis', 'HS14'='CPI_colitis', 'HS15'='CPI_colitis')
+#THIS IS USED FOR MADCAM sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS4'='U','HS5'='U', 'HS6'='U', 'HS7'='P/N', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+#sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+
+# Here plotting with ComplexHeatmap to control y axis
+avg_exp_matrix = as.matrix(avg_exp)
+# Define custom color scale
+
+
+breaks = c(-0.75,0,0.75)  # Explicitly set the min-mid-max values
+#breaks = c(-1,0,1)  # Explicitly set the min-mid-max values
+colors = c("blue", "white", "red")  # Corresponding colors
+
+
+
+
+
+
+
+color_scale = colorRamp2(breaks, colors)
+
+
+# Generate heatmap with ComplexHeatmap
+pseudobulk_heatmap = Heatmap(avg_exp_matrix,
+                             name = "z-score",
+                             col = color_scale,
+                             column_split = sample_status[colnames(avg_exp)],
+                             row_split = gene_status[rownames(avg_exp_matrix)],
+                             show_column_names = T,
+                             border = "black",
+                             rect_gp = gpar(col = "black", lwd = 0.5), # Adds a border to each cell
+                             row_names_gp = grid::gpar(fontsize = 10, fontface = "italic"),
+                             column_names_gp = grid::gpar(fontsize = 10),
+                             column_title_gp = grid::gpar(fontsize = 10),
+                             #row_km = 2,
+                             cluster_rows=T,
+                             cluster_columns=T,
+                             #column_title_rot = 30,  # rotate column names by 90 degrees
+                             heatmap_legend_param = list
+                              (title_gp = gpar(fontsize = 10, fontface = "plain"),
+                                labels_gp = gpar(fontsize = 10)), 
+                             row_title = NULL,  # To remove the default row title since we have italicized the rownames
+                             width = ncol(avg_exp_matrix)*unit(3, "mm"), 
+                             height = nrow(avg_exp_matrix)*unit(3, "mm"),
+                             #right_annotation = ha
+                             )
+
+# Save the heatmap
+heatmap_title <- "GD T cells"
+
+# Save the heatmap with the title as part of the filename
+pdf(paste0(heatmap_title, "_heatmap_avgexp_075_subset.pdf"))
+draw(pseudobulk_heatmap, 
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+dev.off()
+
+# Display heatmap (without saving)
+draw(pseudobulk_heatmap,
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+
+```
+
+
+
+
+```{r}
+###MYELOID
+# Define genes to plot
+genes_to_plot <- c('CD14','CD68','C1QA','C1QB','C1QC','CCL18','CCL3','CCL4','CXCL9','CXCL10','IL32','CTSB','CTSD','CTSL','CTSS','CTSC','CD38','CD40','MT2A','S100A9','S100A8','CLEC9A','CLEC10A','CD1C','CD83','ANXA1')
+up_genes <- c('CD14','CD68','C1QA','C1QB','C1QC','CCL18','CCL3','CCL4','CXCL9','CXCL10','IL32','CTSB','CTSD','CTSL','CTSS','CTSC','CD38','CD40','MT2A','S100A9','S100A8')
+down_genes <- c('CLEC9A','CLEC10A','CD1C','CD83','ANXA1')
+gene_status <- c(rep('Up', length(up_genes)), rep('Down', length(down_genes)))
+names(gene_status) <- c(up_genes, down_genes)
+
+# Prepare the color for the row annotation bar
+row_anno_colors <- ifelse(gene_status == "Up", "white", "white")
+# Create a data.frame to hold this information
+anno_df <- data.frame(status = gene_status, stringsAsFactors = FALSE)
+rownames(anno_df) <- names(gene_status)
+# Create the heatmap row annotation
+ha <- rowAnnotation(status = anno_block(gp = gpar(fill = row_anno_colors), width = unit(2, "mm"), labels = NULL))
+
+# Calculate averages across single-cells for each sample
+avg_exp = AverageExpression(sobj_Finalmyeloid , assays = "RNA", slot = "data", features = genes_to_plot, group.by = "CoLabs_patient")
+
+# Calculate z-scores
+            avg_exp = apply(avg_exp$RNA, 1, scale) %>% t() %>% as.data.frame() %>% setNames(colnames(avg_exp$RNA))
+# Replace the column names
+colnames(avg_exp) <- gsub("XAUT1-HS1", "HS1", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS2", "HS2", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS3", "HS3", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS4", "HS4", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS5", "HS5", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS6", "HS6", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS7", "HS7", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS8", "HS8", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS9", "HS9", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS10", "HS10", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS11", "HS11", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS12", "HS12", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS13", "HS13", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS14", "HS14", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS15", "HS15", colnames(avg_exp))
+# Define the status
+sample_status = c('HS1'='HC', 'HS2'='HC', 'HS3'='HC', 'HS4'='UC','HS5'='UC', 'HS6'='UC', 'HS7'='CPI_colitis', 'HS8'='CPI_colitis', 'HS9'='CPI_colitis', 'HS10'='CPI_colitis', 'HS11'='CPI_colitis', 'HS12'='CPI_colitis', 'HS13'='CPI_colitis', 'HS14'='CPI_colitis', 'HS15'='CPI_colitis')
+#THIS IS USED FOR MADCAM sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS4'='U','HS5'='U', 'HS6'='U', 'HS7'='P/N', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+#sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+
+# Here plotting with ComplexHeatmap to control y axis
+avg_exp_matrix = as.matrix(avg_exp)
+# Define custom color scale
+
+
+breaks = c(-1,0,1)  # Explicitly set the min-mid-max values
+colors = c("blue", "white", "red")  # Corresponding colors
+
+
+
+
+
+
+color_scale = colorRamp2(breaks, colors)
+
+
+# Generate heatmap with ComplexHeatmap
+pseudobulk_heatmap = Heatmap(avg_exp_matrix,
+                             name = "z-score",
+                             col = color_scale,
+                             column_split = sample_status[colnames(avg_exp)],
+                             row_split = gene_status[rownames(avg_exp_matrix)],
+                             show_column_names = T,
+                             border = "black",
+                             rect_gp = gpar(col = "black", lwd = 0.5), # Adds a border to each cell
+                             row_names_gp = grid::gpar(fontsize = 10, fontface = "italic"),
+                             column_names_gp = grid::gpar(fontsize = 10),
+                             column_title_gp = grid::gpar(fontsize = 10),
+                             #row_km = 2,
+                             cluster_rows=T,
+                             cluster_columns=T,
+                             #column_title_rot = 30,  # rotate column names by 90 degrees
+                             heatmap_legend_param = list
+                              (title_gp = gpar(fontsize = 10, fontface = "plain"),
+                                labels_gp = gpar(fontsize = 10)), 
+                             row_title = NULL,  # To remove the default row title since we have italicized the rownames
+                             width = ncol(avg_exp_matrix)*unit(3, "mm"), 
+                             height = nrow(avg_exp_matrix)*unit(3, "mm"),
+                             #right_annotation = ha
+                             )
+
+# Save the heatmap
+heatmap_title <- "Myeloid"
+
+# Save the heatmap with the title as part of the filename
+pdf(paste0(heatmap_title, "_heatmap_avgexp.pdf"))
+draw(pseudobulk_heatmap, 
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+dev.off()
+
+# Display heatmap (without saving)
+draw(pseudobulk_heatmap,
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+
+```
+
+
+
+
+```{r}
+###CYCLING
+# Define genes to plot
+genes_to_plot <- c('FKBP5','STMN1','MKI67','CD3D','CD3E','CD3G','GZMB','CD8A','CTLA4','LAG3','TIGIT','BATF','ENTPD1','TRAC','IFNG','CD8B','GZMA','CD7','JCHAIN','CD79A','MZB1','IGLL5','IGKC','IGHA1','TNFRSF17','IGHA2')
+up_genes <- c('FKBP5','STMN1','MKI67','CD3D','CD3E','CD3G','GZMB','CD8A','CTLA4','LAG3','TIGIT','BATF','ENTPD1','TRAC','IFNG','CD8B','GZMA','CD7')
+down_genes <- c('JCHAIN','CD79A','MZB1','IGLL5','IGKC','IGHA1','TNFRSF17','IGHA2')
+gene_status <- c(rep('Up', length(up_genes)), rep('Down', length(down_genes)))
+names(gene_status) <- c(up_genes, down_genes)
+
+# Prepare the color for the row annotation bar
+row_anno_colors <- ifelse(gene_status == "Up", "white", "white")
+# Create a data.frame to hold this information
+anno_df <- data.frame(status = gene_status, stringsAsFactors = FALSE)
+rownames(anno_df) <- names(gene_status)
+# Create the heatmap row annotation
+ha <- rowAnnotation(status = anno_block(gp = gpar(fill = row_anno_colors), width = unit(2, "mm"), labels = NULL))
+
+# Calculate averages across single-cells for each sample
+avg_exp = AverageExpression(sobj_Finalcycling , assays = "RNA", slot = "data", features = genes_to_plot, group.by = "CoLabs_patient")
+
+# Calculate z-scores
+            avg_exp = apply(avg_exp$RNA, 1, scale) %>% t() %>% as.data.frame() %>% setNames(colnames(avg_exp$RNA))
+# Replace the column names
+colnames(avg_exp) <- gsub("XAUT1-HS1", "HS1", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS2", "HS2", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS3", "HS3", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS4", "HS4", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS5", "HS5", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS6", "HS6", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS7", "HS7", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS8", "HS8", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS9", "HS9", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS10", "HS10", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS11", "HS11", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS12", "HS12", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS13", "HS13", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS14", "HS14", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS15", "HS15", colnames(avg_exp))
+# Define the status
+sample_status = c('HS1'='HC', 'HS2'='HC', 'HS3'='HC', 'HS4'='UC','HS5'='UC', 'HS6'='UC', 'HS7'='CPI_colitis', 'HS8'='CPI_colitis', 'HS9'='CPI_colitis', 'HS10'='CPI_colitis', 'HS11'='CPI_colitis', 'HS12'='CPI_colitis', 'HS13'='CPI_colitis', 'HS14'='CPI_colitis', 'HS15'='CPI_colitis')
+#THIS IS USED FOR MADCAM sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS4'='U','HS5'='U', 'HS6'='U', 'HS7'='P/N', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+#sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+
+# Here plotting with ComplexHeatmap to control y axis
+avg_exp_matrix = as.matrix(avg_exp)
+# Define custom color scale
+
+breaks = c(-1,0,1)  # Explicitly set the min-mid-max values
+#breaks = c(-0.75,0,0.75)  # Explicitly set the min-mid-max values
+colors = c("blue", "white", "red")  # Corresponding colors
+
+
+
+
+
+
+color_scale = colorRamp2(breaks, colors)
+
+
+# Generate heatmap with ComplexHeatmap
+pseudobulk_heatmap = Heatmap(avg_exp_matrix,
+                             name = "z-score",
+                             col = color_scale,
+                             column_split = sample_status[colnames(avg_exp)],
+                             row_split = gene_status[rownames(avg_exp_matrix)],
+                             show_column_names = T,
+                             border = "black",
+                             rect_gp = gpar(col = "black", lwd = 0.5), # Adds a border to each cell
+                             row_names_gp = grid::gpar(fontsize = 10, fontface = "italic"),
+                             column_names_gp = grid::gpar(fontsize = 10),
+                             column_title_gp = grid::gpar(fontsize = 10),
+                             #row_km = 2,
+                             cluster_rows=T,
+                             cluster_columns=T,
+                             #column_title_rot = 30,  # rotate column names by 90 degrees
+                             heatmap_legend_param = list
+                              (title_gp = gpar(fontsize = 10, fontface = "plain"),
+                                labels_gp = gpar(fontsize = 10)), 
+                             row_title = NULL,  # To remove the default row title since we have italicized the rownames
+                             width = ncol(avg_exp_matrix)*unit(3, "mm"), 
+                             height = nrow(avg_exp_matrix)*unit(3, "mm"),
+                             #right_annotation = ha
+                             )
+
+# Save the heatmap
+heatmap_title <- "Cycling"
+
+# Save the heatmap with the title as part of the filename
+pdf(paste0(heatmap_title, "_heatmap_avgexp.pdf"))
+draw(pseudobulk_heatmap, 
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+dev.off()
+
+# Display heatmap (without saving)
+draw(pseudobulk_heatmap,
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+
+```
+
+
+
+
+```{r}
+###EPITHELIAL
+# Define genes to plot
+genes_to_plot <- c('AQP8','FXYD3','GUCA2A','GUCA2B','FABP1','EPCAM','KRT18','KRT19','KRT20','KRT8','CLDN3','CLDN4','PIGR','FCGRT','TFF3','PRAP1','LYPD8','SLC9A3R1','CLCA4','CHP2','ANPEP','SLC25A5','CA1','CA4','CA2','SLC26A2','SLC26A3')
+up_genes <- c()
+down_genes <- c('AQP8','FXYD3','GUCA2A','GUCA2B','FABP1','EPCAM','KRT18','KRT19','KRT20','KRT8','CLDN3','CLDN4','PIGR','FCGRT','TFF3','PRAP1','LYPD8','SLC9A3R1','CLCA4','CHP2','ANPEP','SLC25A5','CA1','CA4','CA2','SLC26A2','SLC26A3')
+gene_status <- c(rep('Up', length(up_genes)), rep('Down', length(down_genes)))
+names(gene_status) <- c(up_genes, down_genes)
+
+# Prepare the color for the row annotation bar
+row_anno_colors <- ifelse(gene_status == "Up", "white", "white")
+# Create a data.frame to hold this information
+anno_df <- data.frame(status = gene_status, stringsAsFactors = FALSE)
+rownames(anno_df) <- names(gene_status)
+# Create the heatmap row annotation
+ha <- rowAnnotation(status = anno_block(gp = gpar(fill = row_anno_colors), width = unit(2, "mm"), labels = NULL))
+
+# Calculate averages across single-cells for each sample
+avg_exp = AverageExpression(sobj_Finalepi, assays = "RNA", slot = "data", features = genes_to_plot, group.by = "CoLabs_patient")
+
+# Calculate z-scores
+            avg_exp = apply(avg_exp$RNA, 1, scale) %>% t() %>% as.data.frame() %>% setNames(colnames(avg_exp$RNA))
+# Replace the column names
+colnames(avg_exp) <- gsub("XAUT1-HS1", "HS1", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS2", "HS2", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS3", "HS3", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS4", "HS4", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS5", "HS5", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS6", "HS6", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS7", "HS7", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS8", "HS8", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS9", "HS9", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS10", "HS10", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS11", "HS11", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS12", "HS12", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS13", "HS13", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS14", "HS14", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS15", "HS15", colnames(avg_exp))
+# Define the status
+sample_status = c('HS1'='HC', 'HS2'='HC', 'HS3'='HC', 'HS4'='UC','HS5'='UC', 'HS6'='UC', 'HS7'='CPI_colitis', 'HS8'='CPI_colitis', 'HS9'='CPI_colitis', 'HS10'='CPI_colitis', 'HS11'='CPI_colitis', 'HS12'='CPI_colitis', 'HS13'='CPI_colitis', 'HS14'='CPI_colitis', 'HS15'='CPI_colitis')
+#THIS IS USED FOR MADCAM sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS4'='U','HS5'='U', 'HS6'='U', 'HS7'='P/N', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+#sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+
+# Here plotting with ComplexHeatmap to control y axis
+avg_exp_matrix = as.matrix(avg_exp)
+# Define custom color scale
+
+breaks = c(-0.75,0,0.75)  # Explicitly set the min-mid-max values
+#breaks = c(-1,0,1)  # Explicitly set the min-mid-max values
+colors = c("blue", "white", "red")  # Corresponding colors
+
+
+
+
+
+
+color_scale = colorRamp2(breaks, colors)
+
+
+# Generate heatmap with ComplexHeatmap
+pseudobulk_heatmap = Heatmap(avg_exp_matrix,
+                             name = "z-score",
+                             col = color_scale,
+                             column_split = sample_status[colnames(avg_exp)],
+                             #row_split = gene_status[rownames(avg_exp_matrix)],
+                             show_column_names = T,
+                             border = "black",
+                             rect_gp = gpar(col = "black", lwd = 0.5), # Adds a border to each cell
+                             row_names_gp = grid::gpar(fontsize = 10, fontface = "italic"),
+                             column_names_gp = grid::gpar(fontsize = 10),
+                             column_title_gp = grid::gpar(fontsize = 10),
+                             #row_km = 2,
+                             cluster_rows=T,
+                             cluster_columns=T,
+                             #column_title_rot = 30,  # rotate column names by 90 degrees
+                             heatmap_legend_param = list
+                              (title_gp = gpar(fontsize = 10, fontface = "plain"),
+                                labels_gp = gpar(fontsize = 10)), 
+                             row_title = NULL,  # To remove the default row title since we have italicized the rownames
+                             width = ncol(avg_exp_matrix)*unit(3, "mm"), 
+                             height = nrow(avg_exp_matrix)*unit(3, "mm"),
+                             #right_annotation = ha
+                             )
+
+# Save the heatmap
+heatmap_title <- "Epithelial"
+
+# Save the heatmap with the title as part of the filename
+pdf(paste0(heatmap_title, "_heatmap_avgexp_075.pdf"))
+draw(pseudobulk_heatmap, 
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+dev.off()
+
+# Display heatmap (without saving)
+draw(pseudobulk_heatmap,
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+
+```
+
+
+
+
+```{r}
+###ENDO
+# Define genes to plot
+genes_to_plot <- c('C1R','CTSS','CCL14','SERPINE1','IL18BP','NNMT','WARS','IDO1','MADCAM1','PLAT','NR4A1','PODXL','KLF2')
+up_genes <- c('C1R','CTSS','CCL14','SERPINE1','IL18BP','NNMT','WARS','IDO1','MADCAM1')
+down_genes <- c('PLAT','NR4A1','PODXL','KLF2')
+gene_status <- c(rep('Up', length(up_genes)), rep('Down', length(down_genes)))
+names(gene_status) <- c(up_genes, down_genes)
+
+# Prepare the color for the row annotation bar
+row_anno_colors <- ifelse(gene_status == "Up", "white", "white")
+# Create a data.frame to hold this information
+anno_df <- data.frame(status = gene_status, stringsAsFactors = FALSE)
+rownames(anno_df) <- names(gene_status)
+# Create the heatmap row annotation
+ha <- rowAnnotation(status = anno_block(gp = gpar(fill = row_anno_colors), width = unit(2, "mm"), labels = NULL))
+
+# Calculate averages across single-cells for each sample
+avg_exp = AverageExpression(sobj_Finalendo , assays = "RNA", slot = "data", features = genes_to_plot, group.by = "CoLabs_patient")
+
+# Calculate z-scores
+            avg_exp = apply(avg_exp$RNA, 1, scale) %>% t() %>% as.data.frame() %>% setNames(colnames(avg_exp$RNA))
+# Replace the column names
+colnames(avg_exp) <- gsub("XAUT1-HS1", "HS1", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS2", "HS2", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS3", "HS3", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS4", "HS4", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS5", "HS5", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS6", "HS6", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS7", "HS7", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS8", "HS8", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS9", "HS9", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS10", "HS10", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS11", "HS11", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS12", "HS12", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS13", "HS13", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS14", "HS14", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS15", "HS15", colnames(avg_exp))
+# Define the status
+sample_status = c('HS1'='HC', 'HS2'='HC', 'HS3'='HC', 'HS4'='UC','HS5'='UC', 'HS6'='UC', 'HS7'='CPI_colitis', 'HS8'='CPI_colitis', 'HS9'='CPI_colitis', 'HS10'='CPI_colitis', 'HS11'='CPI_colitis', 'HS12'='CPI_colitis', 'HS13'='CPI_colitis', 'HS14'='CPI_colitis', 'HS15'='CPI_colitis')
+#THIS IS USED FOR MADCAM sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS4'='U','HS5'='U', 'HS6'='U', 'HS7'='P/N', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+#sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+
+# Here plotting with ComplexHeatmap to control y axis
+avg_exp_matrix = as.matrix(avg_exp)
+# Define custom color scale
+
+breaks = c(-0.75,0,0.75)  # Explicitly set the min-mid-max values
+#breaks = c(-1,0,1)  # Explicitly set the min-mid-max values
+colors = c("blue", "white", "red")  # Corresponding colors
+
+
+
+
+
+
+
+color_scale = colorRamp2(breaks, colors)
+
+
+# Generate heatmap with ComplexHeatmap
+pseudobulk_heatmap = Heatmap(avg_exp_matrix,
+                             name = "z-score",
+                             col = color_scale,
+                             column_split = sample_status[colnames(avg_exp)],
+                             row_split = gene_status[rownames(avg_exp_matrix)],
+                             show_column_names = T,
+                             border = "black",
+                             rect_gp = gpar(col = "black", lwd = 0.5), # Adds a border to each cell
+                             row_names_gp = grid::gpar(fontsize = 10, fontface = "italic"),
+                             column_names_gp = grid::gpar(fontsize = 10),
+                             column_title_gp = grid::gpar(fontsize = 10),
+                             #row_km = 2,
+                             cluster_rows=T,
+                             cluster_columns=T,
+                             #column_title_rot = 30,  # rotate column names by 90 degrees
+                             heatmap_legend_param = list
+                              (title_gp = gpar(fontsize = 10, fontface = "plain"),
+                                labels_gp = gpar(fontsize = 10)), 
+                             row_title = NULL,  # To remove the default row title since we have italicized the rownames
+                             width = ncol(avg_exp_matrix)*unit(3, "mm"), 
+                             height = nrow(avg_exp_matrix)*unit(3, "mm"),
+                             #right_annotation = ha
+                             )
+
+# Save the heatmap
+heatmap_title <- "Endothelial"
+
+# Save the heatmap with the title as part of the filename
+pdf(paste0(heatmap_title, "_heatmap_avgexp_075_subset.pdf"))
+draw(pseudobulk_heatmap, 
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+dev.off()
+
+# Display heatmap (without saving)
+draw(pseudobulk_heatmap,
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+
+```
+
+
+
+
+```{r}
+###MES STROMAL
+# Define genes to plot
+genes_to_plot <- c('FKBP5','MT2A','MT1X','MT1M','IL18BP','CXCL1','CXCL10','CXCL6','IL32','TNFRSF12A','HTRA3','HIPK2','NAMPT','NNMT','WARS','IDO1','BMP5','BMP4','ID3','ID1','ID2','FRZB')
+up_genes <- c('FKBP5','MT2A','MT1X','MT1M','IL18BP','CXCL1','CXCL10','CXCL6','IL32','TNFRSF12A','HTRA3','HIPK2','NAMPT','NNMT','WARS','IDO1')
+down_genes <- c('BMP5','BMP4','ID3','ID1','ID2','FRZB')
+gene_status <- c(rep('Up', length(up_genes)), rep('Down', length(down_genes)))
+names(gene_status) <- c(up_genes, down_genes)
+
+# Prepare the color for the row annotation bar
+row_anno_colors <- ifelse(gene_status == "Up", "white", "white")
+# Create a data.frame to hold this information
+anno_df <- data.frame(status = gene_status, stringsAsFactors = FALSE)
+rownames(anno_df) <- names(gene_status)
+# Create the heatmap row annotation
+ha <- rowAnnotation(status = anno_block(gp = gpar(fill = row_anno_colors), width = unit(2, "mm"), labels = NULL))
+
+# Calculate averages across single-cells for each sample
+avg_exp = AverageExpression(sobj_Finalmes, assays = "RNA", slot = "data", features = genes_to_plot, group.by = "CoLabs_patient")
+
+# Calculate z-scores
+            avg_exp = apply(avg_exp$RNA, 1, scale) %>% t() %>% as.data.frame() %>% setNames(colnames(avg_exp$RNA))
+# Replace the column names
+colnames(avg_exp) <- gsub("XAUT1-HS1", "HS1", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS2", "HS2", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS3", "HS3", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS4", "HS4", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS5", "HS5", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS6", "HS6", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS7", "HS7", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS8", "HS8", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS9", "HS9", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS10", "HS10", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS11", "HS11", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS12", "HS12", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS13", "HS13", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS14", "HS14", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS15", "HS15", colnames(avg_exp))
+# Define the status
+sample_status = c('HS1'='HC', 'HS2'='HC', 'HS3'='HC', 'HS4'='UC','HS5'='UC', 'HS6'='UC', 'HS7'='CPI_colitis', 'HS8'='CPI_colitis', 'HS9'='CPI_colitis', 'HS10'='CPI_colitis', 'HS11'='CPI_colitis', 'HS12'='CPI_colitis', 'HS13'='CPI_colitis', 'HS14'='CPI_colitis', 'HS15'='CPI_colitis')
+#THIS IS USED FOR MADCAM sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS4'='U','HS5'='U', 'HS6'='U', 'HS7'='P/N', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+#sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+
+# Here plotting with ComplexHeatmap to control y axis
+avg_exp_matrix = as.matrix(avg_exp)
+# Define custom color scale
+
+breaks = c(-0.75,0,0.75)  # Explicitly set the min-mid-max values
+#breaks = c(-1,0,1)  # Explicitly set the min-mid-max values
+colors = c("blue", "white", "red")  # Corresponding colors
+
+
+
+
+
+color_scale = colorRamp2(breaks, colors)
+
+
+# Generate heatmap with ComplexHeatmap
+pseudobulk_heatmap = Heatmap(avg_exp_matrix,
+                             name = "z-score",
+                             col = color_scale,
+                             column_split = sample_status[colnames(avg_exp)],
+                             row_split = gene_status[rownames(avg_exp_matrix)],
+                             show_column_names = T,
+                             border = "black",
+                             rect_gp = gpar(col = "black", lwd = 0.5), # Adds a border to each cell
+                             row_names_gp = grid::gpar(fontsize = 10, fontface = "italic"),
+                             column_names_gp = grid::gpar(fontsize = 10),
+                             column_title_gp = grid::gpar(fontsize = 10),
+                             #row_km = 2,
+                             cluster_rows=T,
+                             cluster_columns=T,
+                             #column_title_rot = 30,  # rotate column names by 90 degrees
+                             heatmap_legend_param = list
+                              (title_gp = gpar(fontsize = 10, fontface = "plain"),
+                                labels_gp = gpar(fontsize = 10)), 
+                             row_title = NULL,  # To remove the default row title since we have italicized the rownames
+                             width = ncol(avg_exp_matrix)*unit(3, "mm"), 
+                             height = nrow(avg_exp_matrix)*unit(3, "mm"),
+                             #right_annotation = ha
+                             )
+
+# Save the heatmap
+heatmap_title <- "Mesenchymal stromal"
+
+# Save the heatmap with the title as part of the filename
+pdf(paste0(heatmap_title, "_heatmap_avgexp_075_subset.pdf"))
+draw(pseudobulk_heatmap, 
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+dev.off()
+
+# Display heatmap (without saving)
+draw(pseudobulk_heatmap,
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+
+```
+
+
+
+```{r}
+###Enteric neural
+# Define genes to plot
+genes_to_plot <- c('FKBP5','IL18BP','MT2A','MT1M','CXCL9','CCL2','IL32','TNFRSF12A','CASP4','C1S','C1R','IDO1','WARS','NNMT')
+up_genes <- c('FKBP5','IL18BP','MT2A','MT1M','CXCL9','CCL2','IL32','TNFRSF12A','CASP4','C1S','C1R','IDO1','WARS','NNMT')
+down_genes <- c()
+gene_status <- c(rep('Up', length(up_genes)), rep('Down', length(down_genes)))
+names(gene_status) <- c(up_genes, down_genes)
+
+# Prepare the color for the row annotation bar
+row_anno_colors <- ifelse(gene_status == "Up", "white", "white")
+# Create a data.frame to hold this information
+anno_df <- data.frame(status = gene_status, stringsAsFactors = FALSE)
+rownames(anno_df) <- names(gene_status)
+# Create the heatmap row annotation
+ha <- rowAnnotation(status = anno_block(gp = gpar(fill = row_anno_colors), width = unit(2, "mm"), labels = NULL))
+
+# Calculate averages across single-cells for each sample
+avg_exp = AverageExpression(sobj_Finalent, assays = "RNA", slot = "data", features = genes_to_plot, group.by = "CoLabs_patient")
+
+# Calculate z-scores
+            avg_exp = apply(avg_exp$RNA, 1, scale) %>% t() %>% as.data.frame() %>% setNames(colnames(avg_exp$RNA))
+# Replace the column names
+colnames(avg_exp) <- gsub("XAUT1-HS1", "HS1", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS2", "HS2", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS3", "HS3", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS4", "HS4", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS5", "HS5", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS6", "HS6", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS7", "HS7", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS8", "HS8", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS9", "HS9", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS10", "HS10", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS11", "HS11", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS12", "HS12", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS13", "HS13", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS14", "HS14", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS15", "HS15", colnames(avg_exp))
+# Define the status
+sample_status = c('HS1'='HC', 'HS2'='HC', 'HS3'='HC', 'HS4'='UC','HS5'='UC', 'HS6'='UC', 'HS7'='CPI_colitis', 'HS8'='CPI_colitis', 'HS9'='CPI_colitis', 'HS10'='CPI_colitis', 'HS11'='CPI_colitis', 'HS12'='CPI_colitis', 'HS13'='CPI_colitis', 'HS14'='CPI_colitis', 'HS15'='CPI_colitis')
+#THIS IS USED FOR MADCAM sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS4'='U','HS5'='U', 'HS6'='U', 'HS7'='P/N', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+#sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+
+# Here plotting with ComplexHeatmap to control y axis
+avg_exp_matrix = as.matrix(avg_exp)
+# Define custom color scale
+
+breaks = c(-0.75,0,0.75)  # Explicitly set the min-mid-max values
+#breaks = c(-1,0,1)  # Explicitly set the min-mid-max values
+colors = c("blue", "white", "red")  # Corresponding colors
+
+
+
+
+
+color_scale = colorRamp2(breaks, colors)
+
+
+# Generate heatmap with ComplexHeatmap
+pseudobulk_heatmap = Heatmap(avg_exp_matrix,
+                             name = "z-score",
+                             col = color_scale,
+                             column_split = sample_status[colnames(avg_exp)],
+                             row_split = gene_status[rownames(avg_exp_matrix)],
+                             show_column_names = T,
+                             border = "black",
+                             rect_gp = gpar(col = "black", lwd = 0.5), # Adds a border to each cell
+                             row_names_gp = grid::gpar(fontsize = 10, fontface = "italic"),
+                             column_names_gp = grid::gpar(fontsize = 10),
+                             column_title_gp = grid::gpar(fontsize = 10),
+                             #row_km = 2,
+                             cluster_rows=T,
+                             cluster_columns=T,
+                             #column_title_rot = 30,  # rotate column names by 90 degrees
+                             heatmap_legend_param = list
+                              (title_gp = gpar(fontsize = 10, fontface = "plain"),
+                                labels_gp = gpar(fontsize = 10)), 
+                             row_title = NULL,  # To remove the default row title since we have italicized the rownames
+                             width = ncol(avg_exp_matrix)*unit(3, "mm"), 
+                             height = nrow(avg_exp_matrix)*unit(3, "mm"),
+                             #right_annotation = ha
+                             )
+
+# Save the heatmap
+heatmap_title <- "Enteric neural"
+
+# Save the heatmap with the title as part of the filename
+pdf(paste0(heatmap_title, "_heatmap_avgexp_075_subset.pdf"))
+draw(pseudobulk_heatmap, 
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+dev.off()
+
+# Display heatmap (without saving)
+draw(pseudobulk_heatmap,
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+
+```
+
+
+```{r}
+#subset obj
+sobj_dis <- subset(sobj, subset = disease %in% c('HC', 'UC', 'CPI_colitis'))
+
+Final <- c('HS1', 'HS2', 'HS3', 'HS4', 'HS5', 'HS7','HS8', 'HS9', 'HS10', 'HS11', 'HS12', 'HS13', 'HS14', 'HS15')
+
+CD8TRM <- c('CD8T_RM')
+sobj_CD8TRM <- subset(sobj_dis, subset = JH_FINE %in% CD8TRM)
+sobj_FinalCD8TRM <- subset(sobj_CD8TRM, subset = CoLabs_patient %in% Final)
+
+EpiAC <- c('Epithelial_absorptive_colonocyte')
+sobj_EpiAC <- subset(sobj_dis, subset = JH_FINE %in% EpiAC)
+sobj_FinalEpiAC <- subset(sobj_EpiAC, subset = CoLabs_patient %in% Final)
+
+cDC2 <- c('Myeloid_cDC2')
+sobj_cDC2 <- subset(sobj_dis, subset = JH_FINE %in% cDC2)
+sobj_FinalcDC2 <- subset(sobj_cDC2, subset = CoLabs_patient %in% Final)
+```
+
+```{r}
+###CD8TRM
+# Define genes to plot
+genes_to_plot <- c('JAK3','STAT3','STAT1','ENTPD1','CTLA4','BATF','CD38','LAG3','ITK','CXCR6','GZMB','IFNG','PRF1','SOCS1','ANXA1','TGFB1','TNF')
+up_genes <- c('JAK3','STAT3','STAT1','ENTPD1','CTLA4','BATF','CD38','LAG3','ITK','CXCR6','GZMB','IFNG','PRF1')
+down_genes <- c('SOCS1','ANXA1','TGFB1','TNF')
+gene_status <- c(rep('Up', length(up_genes)), rep('Down', length(down_genes)))
+names(gene_status) <- c(up_genes, down_genes)
+
+# Prepare the color for the row annotation bar
+row_anno_colors <- ifelse(gene_status == "Up", "white", "white")
+# Create a data.frame to hold this information
+anno_df <- data.frame(status = gene_status, stringsAsFactors = FALSE)
+rownames(anno_df) <- names(gene_status)
+# Create the heatmap row annotation
+ha <- rowAnnotation(status = anno_block(gp = gpar(fill = row_anno_colors), width = unit(2, "mm"), labels = NULL))
+
+# Calculate averages across single-cells for each sample
+avg_exp = AverageExpression(sobj_FinalCD8TRM , assays = "RNA", slot = "data", features = genes_to_plot, group.by = "CoLabs_patient")
+
+# Calculate z-scores
+            avg_exp = apply(avg_exp$RNA, 1, scale) %>% t() %>% as.data.frame() %>% setNames(colnames(avg_exp$RNA))
+# Replace the column names
+colnames(avg_exp) <- gsub("XAUT1-HS1", "HS1", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS2", "HS2", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS3", "HS3", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS4", "HS4", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS5", "HS5", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS7", "HS7", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS8", "HS8", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS9", "HS9", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS10", "HS10", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS11", "HS11", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS12", "HS12", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS13", "HS13", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS14", "HS14", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS15", "HS15", colnames(avg_exp))
+# Define the status
+sample_status = c('HS1'='HC', 'HS2'='HC', 'HS3'='HC', 'HS4'='UC','HS5'='UC', 'HS6'='UC', 'HS7'='CPI_colitis', 'HS8'='CPI_colitis', 'HS9'='CPI_colitis', 'HS10'='CPI_colitis', 'HS11'='CPI_colitis', 'HS12'='CPI_colitis', 'HS13'='CPI_colitis', 'HS14'='CPI_colitis', 'HS15'='CPI_colitis')
+#THIS IS USED FOR MADCAM sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS4'='U','HS5'='U', 'HS6'='U', 'HS7'='P/N', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+
+# Here plotting with ComplexHeatmap to control y axis
+avg_exp_matrix = as.matrix(avg_exp)
+# Define custom color scale
+
+#breaks = c(-1,0,1)  # Explicitly set the min-mid-max values
+breaks = c(-0.75,0,0.75)  # Explicitly set the min-mid-max values
+colors = c("blue",  "white","red")  # Corresponding colors
+
+
+color_scale = colorRamp2(breaks, colors)
+
+
+# Generate heatmap with ComplexHeatmap
+pseudobulk_heatmap = Heatmap(avg_exp_matrix,
+                             name = "z-score",
+                             col = color_scale,
+                             column_split = sample_status[colnames(avg_exp)],
+                             row_split = gene_status[rownames(avg_exp_matrix)],
+                             show_column_names = T,
+                             border = "black",
+                             rect_gp = gpar(col = "black", lwd = 0.5), # Adds a border to each cell
+                             row_names_gp = grid::gpar(fontsize = 10, fontface = "italic"),
+                             column_names_gp = grid::gpar(fontsize = 10),
+                             column_title_gp = grid::gpar(fontsize = 10),
+                             #row_km = 2,
+                             cluster_rows=T,
+                             cluster_columns=T,
+                             #column_title_rot = 30,  # rotate column names by 90 degrees
+                             heatmap_legend_param = list
+                              (title_gp = gpar(fontsize = 10, fontface = "plain"),
+                                labels_gp = gpar(fontsize = 10)), 
+                             row_title = NULL,  # To remove the default row title since we have italicized the rownames
+                             width = ncol(avg_exp_matrix)*unit(3, "mm"), 
+                             height = nrow(avg_exp_matrix)*unit(3, "mm"),
+                             #right_annotation = ha
+                             )
+
+# Save the heatmap
+heatmap_title <- "CD8T RM"
+
+# Save the heatmap with the title as part of the filename
+pdf(paste0(heatmap_title, "_heatmap_avgexp_075_subset.pdf"))
+draw(pseudobulk_heatmap, 
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+dev.off()
+
+# Display heatmap (without saving)
+draw(pseudobulk_heatmap,
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+
+```
+
+
+```{r}
+###Epi absorptive colonocytes
+# Define genes to plot
+genes_to_plot <- c('STAT3','STAT1','ISG20','IFITM1','IFITM3','CD74','HLA-DRB1','HLA-DRA','PSMA4','PSME2','PSMB9','POMP','S100A11','S100A16','S100A14','S100P','IFNGR2','PRAP1','AQP8','SLC26A2','FCGRT','GUCA2A','FXYD3','FABP2','SLC25A6','SLC26A3','SLC9A3R1','LYPD8','ANPEP','CA4','CLCA4','CA2')
+up_genes <- c('STAT3','STAT1','ISG20','IFITM1','IFITM3','CD74','HLA-DRB1','HLA-DRA','PSMA4','PSME2','PSMB9','POMP','S100A11','S100A16','S100A14','S100P')
+down_genes <- c('IFNGR2','PRAP1','AQP8','SLC26A2','FCGRT','GUCA2A','FXYD3','FABP2','SLC25A6','SLC26A3','SLC9A3R1','LYPD8','ANPEP','CA4','CLCA4','CA2')
+gene_status <- c(rep('Up', length(up_genes)), rep('Down', length(down_genes)))
+names(gene_status) <- c(up_genes, down_genes)
+
+# Prepare the color for the row annotation bar
+row_anno_colors <- ifelse(gene_status == "Up", "white", "white")
+# Create a data.frame to hold this information
+anno_df <- data.frame(status = gene_status, stringsAsFactors = FALSE)
+rownames(anno_df) <- names(gene_status)
+# Create the heatmap row annotation
+ha <- rowAnnotation(status = anno_block(gp = gpar(fill = row_anno_colors), width = unit(2, "mm"), labels = NULL))
+
+# Calculate averages across single-cells for each sample
+avg_exp = AverageExpression(sobj_FinalEpiAC , assays = "RNA", slot = "data", features = genes_to_plot, group.by = "CoLabs_patient")
+
+# Calculate z-scores
+            avg_exp = apply(avg_exp$RNA, 1, scale) %>% t() %>% as.data.frame() %>% setNames(colnames(avg_exp$RNA))
+# Replace the column names
+colnames(avg_exp) <- gsub("XAUT1-HS1", "HS1", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS2", "HS2", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS3", "HS3", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS4", "HS4", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS5", "HS5", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS7", "HS7", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS8", "HS8", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS9", "HS9", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS10", "HS10", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS11", "HS11", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS12", "HS12", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS13", "HS13", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS14", "HS14", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS15", "HS15", colnames(avg_exp))
+# Define the status
+sample_status = c('HS1'='HC', 'HS2'='HC', 'HS3'='HC', 'HS4'='UC','HS5'='UC', 'HS6'='UC', 'HS7'='CPI_colitis', 'HS8'='CPI_colitis', 'HS9'='CPI_colitis', 'HS10'='CPI_colitis', 'HS11'='CPI_colitis', 'HS12'='CPI_colitis', 'HS13'='CPI_colitis', 'HS14'='CPI_colitis', 'HS15'='CPI_colitis')
+#THIS IS USED FOR MADCAM sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS4'='U','HS5'='U', 'HS6'='U', 'HS7'='P/N', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+
+# Here plotting with ComplexHeatmap to control y axis
+avg_exp_matrix = as.matrix(avg_exp)
+# Define custom color scale
+
+breaks = c(-0.5,0,0.5)  # Explicitly set the min-mid-max values
+#breaks = c(-0.75,0,0.75)  # Explicitly set the min-mid-max values
+#breaks = c(-1,0,1)  # Explicitly set the min-mid-max values
+colors = c("blue",  "white","red")  # Corresponding colors
+
+
+color_scale = colorRamp2(breaks, colors)
+
+
+# Generate heatmap with ComplexHeatmap
+pseudobulk_heatmap = Heatmap(avg_exp_matrix,
+                             name = "z-score",
+                             col = color_scale,
+                             column_split = sample_status[colnames(avg_exp)],
+                             row_split = gene_status[rownames(avg_exp_matrix)],
+                             show_column_names = T,
+                             border = "black",
+                             rect_gp = gpar(col = "black", lwd = 0.5), # Adds a border to each cell
+                             row_names_gp = grid::gpar(fontsize = 10, fontface = "italic"),
+                             column_names_gp = grid::gpar(fontsize = 10),
+                             column_title_gp = grid::gpar(fontsize = 10),
+                             #row_km = 2,
+                             cluster_rows=T,
+                             cluster_columns=T,
+                             #column_title_rot = 30,  # rotate column names by 90 degrees
+                             heatmap_legend_param = list
+                              (title_gp = gpar(fontsize = 10, fontface = "plain"),
+                                labels_gp = gpar(fontsize = 10)), 
+                             row_title = NULL,  # To remove the default row title since we have italicized the rownames
+                             width = ncol(avg_exp_matrix)*unit(3, "mm"), 
+                             height = nrow(avg_exp_matrix)*unit(3, "mm"),
+                             #right_annotation = ha
+                             )
+
+# Save the heatmap
+heatmap_title <- "Epithelial Absorptive Colonocytes"
+
+# Save the heatmap with the title as part of the filename
+pdf(paste0(heatmap_title, "_heatmap_avgexp_050_subset.pdf"))
+draw(pseudobulk_heatmap, 
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+dev.off()
+
+# Display heatmap (without saving)
+draw(pseudobulk_heatmap,
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+
+```
+
+```{r}
+###cDC2
+# Define genes to plot
+genes_to_plot <- c('CXCL10','SPPL2A','RALA','EPSTI1','RIPK2','SOD2','MT2A','IDO1','WARS','FAM26F','CD40','SCIMP','STAT3','STAT1','PSMB9','PSMB8','TAP1','HLA-C','HLA-H','HLA-A','PSME2','LGALS2','IL1R2','IL1B')
+up_genes <- c('CXCL10','SPPL2A','RALA','EPSTI1','RIPK2','SOD2','MT2A','IDO1','WARS','FAM26F','CD40','SCIMP','STAT3','STAT1','PSMB9','PSMB8','TAP1','HLA-C','HLA-H','HLA-A','PSME2')
+down_genes <- c('LGALS2','IL1R2','IL1B')
+gene_status <- c(rep('Up', length(up_genes)), rep('Down', length(down_genes)))
+names(gene_status) <- c(up_genes, down_genes)
+
+# Prepare the color for the row annotation bar
+row_anno_colors <- ifelse(gene_status == "Up", "white", "white")
+# Create a data.frame to hold this information
+anno_df <- data.frame(status = gene_status, stringsAsFactors = FALSE)
+rownames(anno_df) <- names(gene_status)
+# Create the heatmap row annotation
+ha <- rowAnnotation(status = anno_block(gp = gpar(fill = row_anno_colors), width = unit(2, "mm"), labels = NULL))
+
+# Calculate averages across single-cells for each sample
+avg_exp = AverageExpression(sobj_FinalcDC2, assays = "RNA", slot = "data", features = genes_to_plot, group.by = "CoLabs_patient")
+
+# Calculate z-scores
+            avg_exp = apply(avg_exp$RNA, 1, scale) %>% t() %>% as.data.frame() %>% setNames(colnames(avg_exp$RNA))
+# Replace the column names
+colnames(avg_exp) <- gsub("XAUT1-HS1", "HS1", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS2", "HS2", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS3", "HS3", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS4", "HS4", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS5", "HS5", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS7", "HS7", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS8", "HS8", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS9", "HS9", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS10", "HS10", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS11", "HS11", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS12", "HS12", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS13", "HS13", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS14", "HS14", colnames(avg_exp))
+colnames(avg_exp) <- gsub("XAUT1-HS15", "HS15", colnames(avg_exp))
+# Define the status
+sample_status = c('HS1'='HC', 'HS2'='HC', 'HS3'='HC', 'HS4'='UC','HS5'='UC', 'HS6'='UC', 'HS7'='CPI_colitis', 'HS8'='CPI_colitis', 'HS9'='CPI_colitis', 'HS10'='CPI_colitis', 'HS11'='CPI_colitis', 'HS12'='CPI_colitis', 'HS13'='CPI_colitis', 'HS14'='CPI_colitis', 'HS15'='CPI_colitis')
+#THIS IS USED FOR MADCAM sample_status = c('HS1'='H', 'HS2'='H', 'HS3'='H', 'HS4'='U','HS5'='U', 'HS6'='U', 'HS7'='P/N', 'HS8'='P/S', 'HS9'='P/S', 'HS10'='P/T', 'HS11'='P/T', 'HS12'='P/T', 'HS13'='C/S', 'HS14'='C/S', 'HS15'='C/S')
+
+# Here plotting with ComplexHeatmap to control y axis
+avg_exp_matrix = as.matrix(avg_exp)
+# Define custom color scale
+
+#breaks = c(-0.5,0,0.5)  # Explicitly set the min-mid-max values
+ breaks = c(-0.75,0,0.75)  # Explicitly set the min-mid-max values
+#breaks = c(-1,0,1)  # Explicitly set the min-mid-max values
+colors = c("blue",  "white","red")  # Corresponding colors
+
+
+color_scale = colorRamp2(breaks, colors)
+
+
+# Generate heatmap with ComplexHeatmap
+pseudobulk_heatmap = Heatmap(avg_exp_matrix,
+                             name = "z-score",
+                             col = color_scale,
+                             column_split = sample_status[colnames(avg_exp)],
+                             row_split = gene_status[rownames(avg_exp_matrix)],
+                             show_column_names = T,
+                             border = "black",
+                             rect_gp = gpar(col = "black", lwd = 0.5), # Adds a border to each cell
+                             row_names_gp = grid::gpar(fontsize = 10, fontface = "italic"),
+                             column_names_gp = grid::gpar(fontsize = 10),
+                             column_title_gp = grid::gpar(fontsize = 10),
+                             #row_km = 2,
+                             cluster_rows=T,
+                             cluster_columns=T,
+                             #column_title_rot = 30,  # rotate column names by 90 degrees
+                             heatmap_legend_param = list
+                              (title_gp = gpar(fontsize = 10, fontface = "plain"),
+                                labels_gp = gpar(fontsize = 10)), 
+                             row_title = NULL,  # To remove the default row title since we have italicized the rownames
+                             width = ncol(avg_exp_matrix)*unit(3, "mm"), 
+                             height = nrow(avg_exp_matrix)*unit(3, "mm"),
+                             #right_annotation = ha
+                             )
+
+# Save the heatmap
+heatmap_title <- "cDC2"
+
+# Save the heatmap with the title as part of the filename
+pdf(paste0(heatmap_title, "_heatmap_avgexp_075.pdf"))
+draw(pseudobulk_heatmap, 
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+dev.off()
+
+# Display heatmap (without saving)
+draw(pseudobulk_heatmap,
+     column_title = heatmap_title,
+     column_title_gp = grid::gpar(fontsize = 10))
+
+```
+
+
+
+
+
+
+
+
+```{r}
+sessionInfo()
+```
+
